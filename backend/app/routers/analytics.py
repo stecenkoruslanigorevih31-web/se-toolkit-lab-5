@@ -7,6 +7,7 @@ parameter to filter results by lab (e.g., "lab-01").
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import case, func
+from sqlalchemy.types import Numeric
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -124,12 +125,13 @@ async def get_pass_rates(
         return []
     
     task_ids = [t.id for t in tasks]
-    
+
     # Query: join interactions with items, group by task, compute avg and count
+    # Use cast to Numeric for PostgreSQL-compatible rounding
     query = (
         select(
             ItemRecord.title.label("task"),
-            func.round(func.avg(InteractionLog.score), 1).label("avg_score"),
+            func.round(func.cast(func.avg(InteractionLog.score), Numeric), 1).label("avg_score"),
             func.count(InteractionLog.id).label("attempts"),
         )
         .join(ItemRecord, InteractionLog.item_id == ItemRecord.id)
@@ -139,9 +141,13 @@ async def get_pass_rates(
     )
     
     results = await session.exec(query)
-    
+
     return [
-        {"task": row.task, "avg_score": float(row.avg_score), "attempts": row.attempts}
+        {
+            "task": row.task,
+            "avg_score": float(row.avg_score) if row.avg_score is not None else 0.0,
+            "attempts": row.attempts,
+        }
         for row in results.all()
     ]
 
@@ -243,7 +249,7 @@ async def get_groups(
     query = (
         select(
             Learner.student_group.label("group"),
-            func.round(func.avg(InteractionLog.score), 1).label("avg_score"),
+            func.round(func.cast(func.avg(InteractionLog.score), Numeric), 1).label("avg_score"),
             func.count(func.distinct(InteractionLog.learner_id)).label("students"),
         )
         .join(Learner, InteractionLog.learner_id == Learner.id)
@@ -253,8 +259,12 @@ async def get_groups(
     )
     
     results = await session.exec(query)
-    
+
     return [
-        {"group": row.group, "avg_score": float(row.avg_score), "students": row.students}
+        {
+            "group": row.group,
+            "avg_score": float(row.avg_score) if row.avg_score is not None else 0.0,
+            "students": row.students,
+        }
         for row in results.all()
     ]
